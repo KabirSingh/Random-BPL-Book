@@ -44,7 +44,7 @@ pip install requests
 ## Usage
 
 ```bash
-python3 random_bpl_book.py
+python3 main.py
 ```
 
 Run it whenever you want a random book. If all copies are checked out, the output includes a direct link to place a hold.
