@@ -7,13 +7,12 @@ bias — every item in the collection has an equal shot). Displays title,
 author, description, and exactly which branches have it on the shelf.
 
 Usage:
-    python3 random_bpl_book.py
+    python3 main.py
 
 Requires:
     pip install requests
 """
 
-import random
 import sys
 
 try:
@@ -22,56 +21,8 @@ except ImportError:
     print("Missing dependency. Install with: pip install requests")
     sys.exit(1)
 
-GATEWAY    = "https://gateway.bibliocommons.com/v2/libraries/bpl"
-BPL_RECORD = "https://bpl.bibliocommons.com/v2/record"
-
-# BPL bib IDs follow the pattern S75C{number}.
-# Valid IDs were found up to ~9,560,000; ~55% of random integers in this
-# range correspond to real catalog records.
-ID_MIN = 100
-ID_MAX = 9_560_000
-
-
-def make_bib_id(n: int) -> str:
-    return f"S75C{n}"
-
-
-def fetch_availability(bib_id: str) -> dict | None:
-    """Returns the availability JSON, or None if the ID doesn't exist."""
-    r = requests.get(f"{GATEWAY}/bibs/{bib_id}/availability", timeout=15)
-    if r.status_code == 404:
-        return None
-    r.raise_for_status()
-    return r.json()
-
-
-def fetch_metadata(bib_id: str) -> dict | None:
-    """Returns the briefInfo dict for a bib ID, or None on failure."""
-    r = requests.get(f"{GATEWAY}/bibs", params={"metadataIds": bib_id, "locale": "en-US"}, timeout=15)
-    if not r.ok:
-        return None
-    bibs = r.json().get("entities", {}).get("bibs", {})
-    bib  = bibs.get(bib_id)
-    return bib.get("briefInfo") if bib else None
-
-
-def pick_random_book() -> tuple[str, dict, dict]:
-    """
-    Pick a random valid bib ID and return (bib_id, briefInfo, availability_data).
-    Retries silently on 404s (gaps in the ID space).
-    """
-    for _ in range(30):
-        n      = random.randint(ID_MIN, ID_MAX)
-        bib_id = make_bib_id(n)
-        avail  = fetch_availability(bib_id)
-        if avail is None:
-            continue  # gap in the ID space — try another
-        info = fetch_metadata(bib_id)
-        if info is None:
-            continue
-        return bib_id, info, avail
-
-    raise RuntimeError("Could not find a valid book after 30 attempts.")
+from bpl_api import BPL_RECORD
+from bpl_connector import pick_random_book
 
 
 def wrap(text: str, width: int = 58, indent: str = "  ") -> list[str]:
@@ -100,7 +51,6 @@ def display(bib_id: str, info: dict, avail_data: dict) -> None:
     author_str = ", ".join(authors) if authors else "Unknown author"
     full_title = title + (f": {subtitle}" if subtitle else "")
 
-    # Overall availability from the 'availabilities' entity
     avail_entity  = avail_data.get("entities", {}).get("availabilities", {}).get(bib_id, {})
     total_copies  = avail_entity.get("totalCopies", "?")
     avail_copies  = avail_entity.get("availableCopies", "?")
@@ -134,7 +84,6 @@ def display(bib_id: str, info: dict, avail_data: dict) -> None:
     print(f"  {BPL_RECORD}/{bib_id}")
     print(bar)
 
-    # Per-branch breakdown
     items = avail_data.get("entities", {}).get("bibItems", {})
     if not items:
         return
