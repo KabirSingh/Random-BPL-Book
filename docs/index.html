@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Random BPL Book</title>
+  <title>Random Library Book</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -28,9 +28,24 @@
     .subtitle {
       font-size: 0.9rem;
       color: #666;
-      margin-bottom: 36px;
+      margin-bottom: 24px;
       text-align: center;
     }
+
+    select {
+      font-family: Georgia, serif;
+      font-size: 0.95rem;
+      padding: 8px 12px;
+      border: 1px solid #d4cfc6;
+      background: #fff;
+      color: #1a1a1a;
+      margin-bottom: 20px;
+      cursor: pointer;
+      width: 100%;
+      max-width: 320px;
+    }
+
+    select:focus { outline: 1px solid #1a1a1a; }
 
     button {
       background: #1a1a1a;
@@ -61,6 +76,14 @@
       max-width: 560px;
       width: 100%;
       padding: 28px 32px;
+    }
+
+    .card-library {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #aaa;
+      margin-bottom: 10px;
     }
 
     .card-title {
@@ -127,7 +150,7 @@
       font-family: monospace;
     }
 
-    .badge-available { background: #e6f4ea; color: #2d6a4f; }
+    .badge-available   { background: #e6f4ea; color: #2d6a4f; }
     .badge-unavailable { background: #f4e6e6; color: #6a2d2d; }
 
     .record-link {
@@ -146,54 +169,74 @@
 </head>
 <body>
 
-  <h1>Random BPL Book</h1>
-  <p class="subtitle">Every item in the Boston Public Library has an equal shot.</p>
+  <h1>Random Library Book</h1>
+  <p class="subtitle">Every item in the catalog has an equal shot.</p>
+
+  <select id="library-select">
+    <option value="bpl">Boston Public Library</option>
+    <option value="sfpl">San Francisco Public Library</option>
+    <option value="chipublib">Chicago Public Library</option>
+    <option value="seattle">Seattle Public Library</option>
+    <option value="tpl">Toronto Public Library</option>
+  </select>
 
   <button id="btn" onclick="pickBook()">Pick a random book</button>
   <p id="status"></p>
 
   <div id="card">
-    <p class="card-title" id="c-title"></p>
-    <p class="card-author" id="c-author"></p>
-    <div class="meta" id="c-meta"></div>
-    <p class="description" id="c-desc"></p>
-    <div class="branches" id="c-branches"></div>
-    <a class="record-link" id="c-link" target="_blank" rel="noopener"></a>
+    <p class="card-library" id="c-library"></p>
+    <p class="card-title"   id="c-title"></p>
+    <p class="card-author"  id="c-author"></p>
+    <div class="meta"       id="c-meta"></div>
+    <p class="description"  id="c-desc"></p>
+    <div class="branches"   id="c-branches"></div>
+    <a class="record-link"  id="c-link" target="_blank" rel="noopener"></a>
   </div>
 
   <script>
-    const GATEWAY    = "https://bpl-proxy.kabirsingh.workers.dev";
-    const BPL_RECORD = "https://bpl.bibliocommons.com/v2/record";
+    const PROXY = "https://bpl-proxy.kabirsingh.workers.dev";
+
+    const LIBRARIES = {
+      bpl:       { name: "Boston Public Library",        bibPrefix: "S75C",  idMax: 9_560_000, recordBase: "https://bpl.bibliocommons.com/v2/record" },
+      sfpl:      { name: "San Francisco Public Library", bibPrefix: "S93C",  idMax: 6_200_000, recordBase: "https://sfpl.bibliocommons.com/v2/record" },
+      chipublib: { name: "Chicago Public Library",       bibPrefix: "S126C", idMax: 2_700_000, recordBase: "https://chipublib.bibliocommons.com/v2/record" },
+      seattle:   { name: "Seattle Public Library",       bibPrefix: "S30C",  idMax: 1_500_000, recordBase: "https://seattle.bibliocommons.com/v2/record" },
+      tpl:       { name: "Toronto Public Library",       bibPrefix: "S234C", idMax: 3_800_000, recordBase: "https://tpl.bibliocommons.com/v2/record" },
+    };
+
     const ID_MIN = 100;
-    const ID_MAX = 9_560_000;
 
-    function makeBibId(n) { return `S75C${n}`; }
+    function selectedLibrary() {
+      const id = document.getElementById("library-select").value;
+      return { id, ...LIBRARIES[id] };
+    }
 
-    async function fetchAvailability(bibId) {
-      const r = await fetch(`${GATEWAY}/bibs/${bibId}/availability`);
+    function makeBibId(prefix, n) { return `${prefix}${n}`; }
+
+    async function fetchAvailability(lib, bibId) {
+      const r = await fetch(`${PROXY}/v2/libraries/${lib}/bibs/${bibId}/availability`);
       if (r.status === 404) return null;
       if (!r.ok) throw new Error(`Availability fetch failed: ${r.status}`);
       return r.json();
     }
 
-    async function fetchMetadata(bibId) {
-      const url = `${GATEWAY}/bibs?metadataIds=${bibId}&locale=en-US`;
-      const r = await fetch(url);
+    async function fetchMetadata(lib, bibId) {
+      const r = await fetch(`${PROXY}/v2/libraries/${lib}/bibs?metadataIds=${bibId}&locale=en-US`);
       if (!r.ok) return null;
       const data = await r.json();
-      const bib = data?.entities?.bibs?.[bibId];
+      const bib  = data?.entities?.bibs?.[bibId];
       return bib?.briefInfo ?? null;
     }
 
-    async function pickRandomBook() {
+    async function pickRandomBook(library) {
       for (let i = 0; i < 30; i++) {
-        const n     = Math.floor(Math.random() * (ID_MAX - ID_MIN + 1)) + ID_MIN;
-        const bibId = makeBibId(n);
-        const avail = await fetchAvailability(bibId);
+        const n     = Math.floor(Math.random() * (library.idMax - ID_MIN + 1)) + ID_MIN;
+        const bibId = makeBibId(library.bibPrefix, n);
+        const avail = await fetchAvailability(library.id, bibId);
         if (!avail) continue;
-        const info = await fetchMetadata(bibId);
+        const info = await fetchMetadata(library.id, bibId);
         if (!info) continue;
-        return { bibId, info, avail };
+        return { bibId, info, avail, library };
       }
       throw new Error("Could not find a valid book after 30 attempts.");
     }
@@ -203,7 +246,7 @@
       return `<span class="meta-label">${label}</span><span>${value}</span>`;
     }
 
-    function renderCard({ bibId, info, avail }) {
+    function renderCard({ bibId, info, avail, library }) {
       const title    = info.title || "Unknown title";
       const subtitle = info.subtitle ? `: ${info.subtitle}` : "";
       const authors  = (info.authors || []).join(", ") || "Unknown author";
@@ -213,8 +256,9 @@
       const total       = availEntity.totalCopies ?? "?";
       const available   = availEntity.availableCopies ?? "?";
 
-      document.getElementById("c-title").textContent  = title + subtitle;
-      document.getElementById("c-author").textContent = `by ${authors}`;
+      document.getElementById("c-library").textContent = library.name;
+      document.getElementById("c-title").textContent   = title + subtitle;
+      document.getElementById("c-author").textContent  = `by ${authors}`;
 
       document.getElementById("c-meta").innerHTML = [
         metaRow("Format",  info.format),
@@ -225,11 +269,10 @@
       ].join("");
 
       const descEl = document.getElementById("c-desc");
-      descEl.textContent = desc;
-      descEl.style.display = desc ? "block" : "none";
+      descEl.textContent    = desc;
+      descEl.style.display  = desc ? "block" : "none";
 
-      // Per-branch breakdown
-      const items = avail?.entities?.bibItems || {};
+      const items    = avail?.entities?.bibItems || {};
       const branches = {};
       for (const item of Object.values(items)) {
         const name   = item.branchName || item.branch?.name || "Unknown";
@@ -238,14 +281,10 @@
         branches[name].push(status);
       }
 
-      const onShelf = Object.entries(branches)
-        .filter(([, ss]) => ss.includes("AVAILABLE"))
-        .sort(([a], [b]) => a.localeCompare(b));
+      const onShelf     = Object.entries(branches).filter(([, ss]) => ss.includes("AVAILABLE")).sort(([a], [b]) => a.localeCompare(b));
+      const allBranches = Object.entries(branches).sort(([a], [b]) => a.localeCompare(b));
+      const branchesEl  = document.getElementById("c-branches");
 
-      const allBranches = Object.entries(branches)
-        .sort(([a], [b]) => a.localeCompare(b));
-
-      const branchesEl = document.getElementById("c-branches");
       if (Object.keys(branches).length === 0) {
         branchesEl.style.display = "none";
       } else {
@@ -257,35 +296,33 @@
         const rows = (onShelf.length > 0 ? onShelf : allBranches).map(([name, ss]) => {
           const count    = ss.filter(s => s === "AVAILABLE").length || ss.length;
           const hasAvail = ss.includes("AVAILABLE");
-          return `
-            <div class="branch-row">
-              <span>${name}</span>
-              <span class="badge ${hasAvail ? "badge-available" : "badge-unavailable"}">
-                ${count} cop${count === 1 ? "y" : "ies"}
-              </span>
-            </div>`;
+          return `<div class="branch-row">
+            <span>${name}</span>
+            <span class="badge ${hasAvail ? "badge-available" : "badge-unavailable"}">${count} cop${count === 1 ? "y" : "ies"}</span>
+          </div>`;
         }).join("");
 
         branchesEl.innerHTML = `<p class="branches-heading">${heading}</p>${rows}`;
       }
 
-      const link = `${BPL_RECORD}/${bibId}`;
-      const linkEl = document.getElementById("c-link");
-      linkEl.href        = link;
-      linkEl.textContent = link;
+      const link = `${library.recordBase}/${bibId}`;
+      const linkEl        = document.getElementById("c-link");
+      linkEl.href         = link;
+      linkEl.textContent  = link;
 
       document.getElementById("card").style.display = "block";
     }
 
     async function pickBook() {
-      const btn    = document.getElementById("btn");
-      const status = document.getElementById("status");
-      btn.disabled = true;
+      const btn     = document.getElementById("btn");
+      const status  = document.getElementById("status");
+      const library = selectedLibrary();
+      btn.disabled  = true;
       document.getElementById("card").style.display = "none";
-      status.textContent = "Searching the catalog…";
+      status.textContent = `Searching the ${library.name} catalog…`;
 
       try {
-        const result = await pickRandomBook();
+        const result = await pickRandomBook(library);
         status.textContent = "";
         renderCard(result);
       } catch (e) {

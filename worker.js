@@ -1,4 +1,4 @@
-const UPSTREAM = "https://gateway.bibliocommons.com/v2/libraries/bpl";
+const UPSTREAM = "https://gateway.bibliocommons.com";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin":  "*",
