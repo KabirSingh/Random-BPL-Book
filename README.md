@@ -21,32 +21,9 @@ Supported libraries:
 
 > Detroit Public Library uses SirsiDynix, which doesn't expose a public API for bibliographic data. DPL results show title, call number, and branch availability — click the record link for full details.
 
-## CLI (Boston Public Library only)
+## CLI
 
-```
-Picking a random book from the Boston Public Library…
-
-==============================================================
-  Frog
-  by Taylor, Kim
-==============================================================
-  Format  : BK
-  Year    : 1991
-  Edition : 1st American ed
-  Call #  : QL668.E2 T24 1991
-  Copies  : 2 available / 2 in system
-
-  Photographs and text show the development of a frog from
-  the egg stage through its first year.
-
-  https://bpl.bibliocommons.com/v2/record/S75C698960
-==============================================================
-
-  On the shelf right now:
-    BPL-High Density Offsite Storage  —  1 copy
-    BPS- Quincy Elementary School  —  1 copy
-==============================================================
-```
+Supports all the same libraries as the web app. Defaults to Detroit Public Library.
 
 ### Requirements
 
@@ -59,7 +36,14 @@ pip install requests
 ### Usage
 
 ```bash
-python3 main.py
+python3 main.py                  # Detroit Public Library (default)
+python3 main.py -l bpl           # Boston Public Library
+python3 main.py -l sfpl          # San Francisco Public Library
+python3 main.py -l chipublib     # Chicago Public Library
+python3 main.py -l seattle       # Seattle Public Library
+python3 main.py -l tpl           # Toronto Public Library
+python3 main.py --list           # show all supported libraries
+python3 main.py --help           # show usage
 ```
 
 ## How it works
@@ -75,9 +59,11 @@ DPL uses SirsiDynix. The app calls SirsiDynix's `lookupTitleInfo` REST endpoint 
 ### Architecture
 
 ```
-main.py           — CLI entry point
-bpl_connector.py  — orchestration layer
-bpl_api.py        — data access layer (BiblioCommons API)
-docs/index.html   — web frontend (GitHub Pages)
-worker.js         — Cloudflare Worker CORS proxy
+main.py                — CLI entry point
+lib/libraries.py       — library registry and config
+lib/connector.py       — orchestration layer
+lib/bc_api.py          — DAL for BiblioCommons libraries
+lib/dpl_api.py         — DAL for Detroit Public Library (SirsiDynix)
+docs/index.html        — web frontend (GitHub Pages)
+worker.js              — Cloudflare Worker CORS proxy
 ```
