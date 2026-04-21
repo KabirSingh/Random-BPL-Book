@@ -16,6 +16,20 @@
 
   <!-- Google Search Console verification -->
   <meta name="google-site-verification" content="riFlPE_r4kGbPR2wpEs5rCcMv5-Drhz4Wnam8_s-Qsk" />
+
+  <!-- Structured data for search engines and LLMs -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Random Library Book",
+    "url": "https://kabirsingh.github.io/Random-BPL-Book/",
+    "description": "A free tool that picks a completely random book from a public library catalog. Supports Boston Public Library, Detroit Public Library, San Francisco Public Library, Chicago Public Library, Seattle Public Library, and Toronto Public Library. No algorithm, no recommendations — every item in the collection has an equal shot.",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "Any",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -179,6 +193,33 @@
     }
 
     .record-link:hover { color: #1a1a1a; }
+
+    footer {
+      margin-top: 64px;
+      max-width: 560px;
+      width: 100%;
+      border-top: 1px solid #d4cfc6;
+      padding-top: 24px;
+      padding-bottom: 48px;
+      font-size: 0.82rem;
+      color: #888;
+      line-height: 1.7;
+    }
+
+    footer p { margin-bottom: 10px; }
+
+    footer ul {
+      margin: 0 0 10px 16px;
+    }
+
+    footer a { color: #888; }
+    footer a:hover { color: #1a1a1a; }
+
+    footer code {
+      font-size: 0.8rem;
+      background: #ede8df;
+      padding: 1px 5px;
+    }
   </style>
 </head>
 <body>
@@ -481,6 +522,27 @@
       }
     }
   </script>
+
+  <footer>
+    <p>
+      A free random book picker for public library catalogs. Pick up something
+      you never would have searched for — no algorithm, no recommendations, no
+      filter bubble. Every physical item in the collection has an equal shot.
+    </p>
+    <p>Supported libraries:</p>
+    <ul>
+      <li><strong>Boston Public Library</strong> (Boston, MA) — BiblioCommons catalog</li>
+      <li><strong>Detroit Public Library</strong> (Detroit, MI) — SirsiDynix catalog</li>
+      <li><strong>San Francisco Public Library</strong> (San Francisco, CA) — BiblioCommons catalog</li>
+      <li><strong>Chicago Public Library</strong> (Chicago, IL) — BiblioCommons catalog</li>
+      <li><strong>Seattle Public Library</strong> (Seattle, WA) — BiblioCommons catalog</li>
+      <li><strong>Toronto Public Library</strong> (Toronto, ON) — BiblioCommons catalog</li>
+    </ul>
+    <p>
+      Also available as a command-line tool. Run <code>python3 main.py --help</code> for usage.
+      Source code on <a href="https://github.com/KabirSingh/Random-BPL-Book" rel="noopener">GitHub</a>.
+    </p>
+  </footer>
 
 </body>
 </html>
