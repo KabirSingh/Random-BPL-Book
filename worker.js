@@ -1,4 +1,8 @@
-const UPSTREAM = "https://gateway.bibliocommons.com";
+const ALLOWED_HOSTS = new Set([
+  "gateway.bibliocommons.com",
+  "sdws02.sirsidynix.net",
+  "detp.ent.sirsi.net",
+]);
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin":  "*",
@@ -12,10 +16,18 @@ export default {
       return new Response(null, { headers: CORS_HEADERS });
     }
 
-    const url      = new URL(request.url);
-    const upstream = new URL(UPSTREAM + url.pathname + url.search);
+    const url       = new URL(request.url);
+    const parts     = url.pathname.split("/").filter(Boolean);
+    const host      = parts[0];
+    const remainder = "/" + parts.slice(1).join("/");
 
-    const response = await fetch(upstream.toString(), {
+    if (!ALLOWED_HOSTS.has(host)) {
+      return new Response("Not allowed", { status: 403 });
+    }
+
+    const upstream = `https://${host}${remainder}${url.search}`;
+
+    const response = await fetch(upstream, {
       headers: { "User-Agent": "Mozilla/5.0" },
     });
 

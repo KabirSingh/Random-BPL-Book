@@ -58,7 +58,7 @@
       letter-spacing: 0.03em;
     }
 
-    button:hover { background: #333; }
+    button:hover    { background: #333; }
     button:disabled { background: #999; cursor: not-allowed; }
 
     #status {
@@ -148,6 +148,8 @@
       padding: 2px 8px;
       border-radius: 2px;
       font-family: monospace;
+      flex-shrink: 0;
+      margin-left: 12px;
     }
 
     .badge-available   { background: #e6f4ea; color: #2d6a4f; }
@@ -174,6 +176,7 @@
 
   <select id="library-select">
     <option value="bpl">Boston Public Library</option>
+    <option value="dpl">Detroit Public Library</option>
     <option value="sfpl">San Francisco Public Library</option>
     <option value="chipublib">Chicago Public Library</option>
     <option value="seattle">Seattle Public Library</option>
@@ -196,7 +199,8 @@
   <script>
     const PROXY = "https://bpl-proxy.kabirsingh.workers.dev";
 
-    const LIBRARIES = {
+    // BiblioCommons libraries
+    const BC_LIBRARIES = {
       bpl:       { name: "Boston Public Library",        bibPrefix: "S75C",  idMax: 9_560_000, recordBase: "https://bpl.bibliocommons.com/v2/record" },
       sfpl:      { name: "San Francisco Public Library", bibPrefix: "S93C",  idMax: 6_200_000, recordBase: "https://sfpl.bibliocommons.com/v2/record" },
       chipublib: { name: "Chicago Public Library",       bibPrefix: "S126C", idMax: 2_700_000, recordBase: "https://chipublib.bibliocommons.com/v2/record" },
@@ -204,111 +208,237 @@
       tpl:       { name: "Toronto Public Library",       bibPrefix: "S234C", idMax: 3_800_000, recordBase: "https://tpl.bibliocommons.com/v2/record" },
     };
 
+    // SirsiDynix libraries
+    const SIRSI_LIBRARIES = {
+      dpl: { name: "Detroit Public Library", idMin: 10_000, idMax: 1_500_000 },
+    };
+
+    const DPL_BRANCH_NAMES = {
+      BREL: "Elmwood Park Branch",
+      BRRD: "Redford Branch",
+    };
+
+    const UNAVAILABLE_LOCATIONS = new Set([
+      "CHECKEDOUT", "TRANSIT", "INTRANSIT", "MISSING", "LOST", "BINDERY", "ILL",
+    ]);
+
     const ID_MIN = 100;
 
-    function selectedLibrary() {
-      const id = document.getElementById("library-select").value;
-      return { id, ...LIBRARIES[id] };
-    }
+    // -------------------------------------------------------------------------
+    // BiblioCommons
+    // -------------------------------------------------------------------------
 
-    function makeBibId(prefix, n) { return `${prefix}${n}`; }
-
-    async function fetchAvailability(lib, bibId) {
-      const r = await fetch(`${PROXY}/v2/libraries/${lib}/bibs/${bibId}/availability`);
+    async function fetchBCAvailability(libId, bibId) {
+      const r = await fetch(`${PROXY}/gateway.bibliocommons.com/v2/libraries/${libId}/bibs/${bibId}/availability`);
       if (r.status === 404) return null;
       if (!r.ok) throw new Error(`Availability fetch failed: ${r.status}`);
       return r.json();
     }
 
-    async function fetchMetadata(lib, bibId) {
-      const r = await fetch(`${PROXY}/v2/libraries/${lib}/bibs?metadataIds=${bibId}&locale=en-US`);
+    async function fetchBCMetadata(libId, bibId) {
+      const r = await fetch(`${PROXY}/gateway.bibliocommons.com/v2/libraries/${libId}/bibs?metadataIds=${bibId}&locale=en-US`);
       if (!r.ok) return null;
       const data = await r.json();
       const bib  = data?.entities?.bibs?.[bibId];
       return bib?.briefInfo ?? null;
     }
 
-    async function pickRandomBook(library) {
+    async function pickBCBook(id, library) {
       for (let i = 0; i < 30; i++) {
         const n     = Math.floor(Math.random() * (library.idMax - ID_MIN + 1)) + ID_MIN;
-        const bibId = makeBibId(library.bibPrefix, n);
-        const avail = await fetchAvailability(library.id, bibId);
+        const bibId = library.bibPrefix + n;
+        const avail = await fetchBCAvailability(id, bibId);
         if (!avail) continue;
-        const info = await fetchMetadata(library.id, bibId);
+        const info = await fetchBCMetadata(id, bibId);
         if (!info) continue;
-        return { bibId, info, avail, library };
+        return normalizeBC(bibId, info, avail, library);
       }
       throw new Error("Could not find a valid book after 30 attempts.");
     }
 
+    function normalizeBC(bibId, info, avail, library) {
+      const availEntity = avail?.entities?.availabilities?.[bibId] || {};
+      const items       = avail?.entities?.bibItems || {};
+      const branches    = {};
+
+      for (const item of Object.values(items)) {
+        const name      = item.branchName || item.branch?.name || "Unknown";
+        const available = item.availability?.status === "AVAILABLE";
+        if (!branches[name]) branches[name] = { available: 0, total: 0 };
+        branches[name].total++;
+        if (available) branches[name].available++;
+      }
+
+      return {
+        library,
+        title:           info.title || "Unknown title",
+        subtitle:        info.subtitle || "",
+        authors:         info.authors || [],
+        format:          info.format || "",
+        publicationDate: info.publicationDate || "",
+        edition:         info.edition || "",
+        callNumber:      info.callNumber || "",
+        description:     info.description || "",
+        totalCopies:     availEntity.totalCopies ?? "?",
+        availableCopies: availEntity.availableCopies ?? "?",
+        branches,
+        recordUrl: `${library.recordBase}/${bibId}`,
+      };
+    }
+
+    // -------------------------------------------------------------------------
+    // Detroit Public Library (SirsiDynix)
+    // -------------------------------------------------------------------------
+
+    async function fetchDPLAvailability(id) {
+      const r = await fetch(
+        `${PROXY}/sdws02.sirsidynix.net/detp_ilsws/rest/standard/lookupTitleInfo` +
+        `?clientID=DS_CLIENT&titleID=${id}&includeItemInfo=true`
+      );
+      if (!r.ok) return null;
+      const xml = await r.text();
+      const doc = new DOMParser().parseFromString(xml, "text/xml");
+      if (doc.querySelector("parsererror") || !doc.querySelector("TitleInfo")) return null;
+      return doc;
+    }
+
+    async function fetchDPLTitle(id) {
+      const path = `client/en_US/default/search/detailnonmodal/ent:$002f$002fSD_ILS$002f0$002fSD_ILS:${id}/one`;
+      const r    = await fetch(`${PROXY}/detp.ent.sirsi.net/${path}`);
+      if (!r.ok) return null;
+      const html  = await r.text();
+      const match = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+      return match ? match[1].trim() : null;
+    }
+
+    async function pickDPLBook(library) {
+      const idMin = library.idMin;
+      const idMax = library.idMax;
+
+      for (let i = 0; i < 30; i++) {
+        const id    = Math.floor(Math.random() * (idMax - idMin + 1)) + idMin;
+        const xml   = await fetchDPLAvailability(id);
+        if (!xml) continue;
+
+        // Only proceed if the record has at least one physical book
+        const hasBook = [...xml.querySelectorAll("ItemInfo")].some(item =>
+          (item.querySelector("itemTypeID")?.textContent || "").toUpperCase().includes("BOOK")
+        );
+        if (!hasBook) continue;
+
+        const title = await fetchDPLTitle(id);
+        if (!title) continue;
+
+        return normalizeDPL(id, xml, title, library);
+      }
+      throw new Error("Could not find a valid book after 30 attempts.");
+    }
+
+    function normalizeDPL(id, xmlDoc, title, library) {
+      const callInfos  = [...xmlDoc.querySelectorAll("CallInfo")];
+      const branches   = {};
+      let totalCopies     = 0;
+      let availableCopies = 0;
+      let callNumber      = "";
+
+      for (const callInfo of callInfos) {
+        const code       = callInfo.querySelector("libraryID")?.textContent || "";
+        const branchName = DPL_BRANCH_NAMES[code] || code;
+        if (!callNumber) callNumber = callInfo.querySelector("callNumber")?.textContent || "";
+
+        const bookItems = [...callInfo.querySelectorAll("ItemInfo")].filter(item =>
+          (item.querySelector("itemTypeID")?.textContent || "").toUpperCase().includes("BOOK")
+        );
+
+        for (const item of bookItems) {
+          const loc       = (item.querySelector("currentLocationID")?.textContent || "").toUpperCase();
+          const available = !UNAVAILABLE_LOCATIONS.has(loc);
+          totalCopies++;
+          if (available) availableCopies++;
+          if (!branches[branchName]) branches[branchName] = { available: 0, total: 0 };
+          branches[branchName].total++;
+          if (available) branches[branchName].available++;
+        }
+      }
+
+      return {
+        library,
+        title,
+        subtitle:        "",
+        authors:         [],
+        format:          "",
+        publicationDate: "",
+        edition:         "",
+        callNumber,
+        description:     "",
+        totalCopies,
+        availableCopies,
+        branches,
+        recordUrl: `https://detp.ent.sirsi.net/client/en_US/default/search/detailnonmodal/ent:$002f$002fSD_ILS$002f0$002fSD_ILS:${id}/one`,
+      };
+    }
+
+    // -------------------------------------------------------------------------
+    // Shared rendering
+    // -------------------------------------------------------------------------
+
     function metaRow(label, value) {
-      if (!value) return "";
+      if (!value && value !== 0) return "";
       return `<span class="meta-label">${label}</span><span>${value}</span>`;
     }
 
-    function renderCard({ bibId, info, avail, library }) {
-      const title    = info.title || "Unknown title";
-      const subtitle = info.subtitle ? `: ${info.subtitle}` : "";
-      const authors  = (info.authors || []).join(", ") || "Unknown author";
-      const desc     = info.description || "";
+    function renderCard(book) {
+      document.getElementById("c-library").textContent = book.library.name;
+      document.getElementById("c-title").textContent   = book.title + (book.subtitle ? `: ${book.subtitle}` : "");
 
-      const availEntity = avail?.entities?.availabilities?.[bibId] || {};
-      const total       = availEntity.totalCopies ?? "?";
-      const available   = availEntity.availableCopies ?? "?";
-
-      document.getElementById("c-library").textContent = library.name;
-      document.getElementById("c-title").textContent   = title + subtitle;
-      document.getElementById("c-author").textContent  = `by ${authors}`;
-
-      document.getElementById("c-meta").innerHTML = [
-        metaRow("Format",  info.format),
-        metaRow("Year",    info.publicationDate),
-        metaRow("Edition", info.edition),
-        metaRow("Call #",  info.callNumber),
-        metaRow("Copies",  `${available} available / ${total} in system`),
-      ].join("");
-
-      const descEl = document.getElementById("c-desc");
-      descEl.textContent    = desc;
-      descEl.style.display  = desc ? "block" : "none";
-
-      const items    = avail?.entities?.bibItems || {};
-      const branches = {};
-      for (const item of Object.values(items)) {
-        const name   = item.branchName || item.branch?.name || "Unknown";
-        const status = item.availability?.status || "UNKNOWN";
-        if (!branches[name]) branches[name] = [];
-        branches[name].push(status);
+      const authorEl = document.getElementById("c-author");
+      if (book.authors.length > 0) {
+        authorEl.textContent  = `by ${book.authors.join(", ")}`;
+        authorEl.style.display = "block";
+      } else {
+        authorEl.style.display = "none";
       }
 
-      const onShelf     = Object.entries(branches).filter(([, ss]) => ss.includes("AVAILABLE")).sort(([a], [b]) => a.localeCompare(b));
-      const allBranches = Object.entries(branches).sort(([a], [b]) => a.localeCompare(b));
-      const branchesEl  = document.getElementById("c-branches");
+      document.getElementById("c-meta").innerHTML = [
+        metaRow("Format",  book.format),
+        metaRow("Year",    book.publicationDate),
+        metaRow("Edition", book.edition),
+        metaRow("Call #",  book.callNumber),
+        metaRow("Copies",  `${book.availableCopies} available / ${book.totalCopies} in system`),
+      ].join("");
 
-      if (Object.keys(branches).length === 0) {
+      const descEl          = document.getElementById("c-desc");
+      descEl.textContent    = book.description;
+      descEl.style.display  = book.description ? "block" : "none";
+
+      const branchesEl = document.getElementById("c-branches");
+      const entries    = Object.entries(book.branches).sort(([a], [b]) => a.localeCompare(b));
+
+      if (entries.length === 0) {
         branchesEl.style.display = "none";
       } else {
-        branchesEl.style.display = "block";
+        const onShelf = entries.filter(([, v]) => v.available > 0);
+        const display = onShelf.length > 0 ? onShelf : entries;
         const heading = onShelf.length > 0
           ? "On the shelf right now"
           : "No copies on shelf — branches that own this title";
 
-        const rows = (onShelf.length > 0 ? onShelf : allBranches).map(([name, ss]) => {
-          const count    = ss.filter(s => s === "AVAILABLE").length || ss.length;
-          const hasAvail = ss.includes("AVAILABLE");
+        const rows = display.map(([name, v]) => {
+          const count    = v.available > 0 ? v.available : v.total;
+          const hasAvail = v.available > 0;
           return `<div class="branch-row">
             <span>${name}</span>
             <span class="badge ${hasAvail ? "badge-available" : "badge-unavailable"}">${count} cop${count === 1 ? "y" : "ies"}</span>
           </div>`;
         }).join("");
 
-        branchesEl.innerHTML = `<p class="branches-heading">${heading}</p>${rows}`;
+        branchesEl.style.display = "block";
+        branchesEl.innerHTML     = `<p class="branches-heading">${heading}</p>${rows}`;
       }
 
-      const link = `${library.recordBase}/${bibId}`;
-      const linkEl        = document.getElementById("c-link");
-      linkEl.href         = link;
-      linkEl.textContent  = link;
+      const linkEl       = document.getElementById("c-link");
+      linkEl.href        = book.recordUrl;
+      linkEl.textContent = book.recordUrl;
 
       document.getElementById("card").style.display = "block";
     }
@@ -316,15 +446,22 @@
     async function pickBook() {
       const btn     = document.getElementById("btn");
       const status  = document.getElementById("status");
-      const library = selectedLibrary();
-      btn.disabled  = true;
+      const libId   = document.getElementById("library-select").value;
+
+      const library = BC_LIBRARIES[libId]
+        ? { id: libId, type: "bc",    ...BC_LIBRARIES[libId] }
+        : { id: libId, type: "sirsi", ...SIRSI_LIBRARIES[libId] };
+
+      btn.disabled           = true;
       document.getElementById("card").style.display = "none";
-      status.textContent = `Searching the ${library.name} catalog…`;
+      status.textContent     = `Searching the ${library.name} catalog…`;
 
       try {
-        const result = await pickRandomBook(library);
+        const book = library.type === "sirsi"
+          ? await pickDPLBook(library)
+          : await pickBCBook(libId, library);
         status.textContent = "";
-        renderCard(result);
+        renderCard(book);
       } catch (e) {
         status.textContent = `Error: ${e.message}`;
       } finally {
